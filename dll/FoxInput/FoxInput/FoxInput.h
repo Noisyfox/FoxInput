@@ -23,3 +23,6 @@ extern "C" {
 #ifdef __cplusplus
 }
 #endif
+
+bool InstallWndProc();
+bool UninstallWndProc();

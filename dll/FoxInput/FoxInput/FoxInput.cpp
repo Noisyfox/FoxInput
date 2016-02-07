@@ -28,6 +28,11 @@ void SetPosition()
     ImmReleaseContext(w_hwnd, hmic);
 }
 
+void CALLBACK OnChar(WCHAR wc) {
+    WCHAR str[] = { wc, L'\n', L'\0' };
+    OutputDebugStringW(str);
+}
+
 LRESULT CALLBACK IMEProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
@@ -46,14 +51,43 @@ LRESULT CALLBACK IMEProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         if (*trapped) {
             return 0;
         }
+
+        switch (message)
+        {
+        case WM_CHAR:
+            OnChar((WCHAR)wParam);
+            return 0;
+            //break;
+        }
     }
 
     return CallWindowProc(OldProc, hWnd, message, wParam, lParam);
 }
 
-void CALLBACK OnChar(WCHAR wc) {
-    WCHAR str[] = {wc, L'\n', L'\0'};
-    OutputDebugStringW(str);
+bool InstallWndProc() {
+    if (OldProc) {
+        return true;
+    }
+
+    OldProc = (WNDPROC)SetWindowLong(w_hwnd, GWL_WNDPROC, (LONG)IMEProc);
+
+    return OldProc != NULL;
+}
+
+bool UninstallWndProc() {
+    if (!OldProc) {
+        return true;
+    }
+
+    WNDPROC p = (WNDPROC)SetWindowLong(w_hwnd, GWL_WNDPROC, (LONG)OldProc);
+
+    if (p != NULL)
+    {
+        OldProc = NULL;
+        return true;
+    }
+
+    return false;
 }
 
 double FI_Init(double hwnd)
@@ -65,46 +99,34 @@ double FI_Init_GMS(HWND hwnd)
 {
     w_hwnd = hwnd;
 
-    OldProc = (WNDPROC)SetWindowLong(w_hwnd, GWL_WNDPROC, (LONG)IMEProc);
+    bool procSucc = InstallWndProc();
 
-    MessageBoxA(nullptr, "aaa", nullptr, 0);
+    if (procSucc) {
+        ImeUiCallback_Malloc = malloc;
+        ImeUiCallback_Free = free;
+        //ImeUiCallback_OnChar = OnChar;
+        ImeUi_Initialize(w_hwnd);
+        ImeUi_EnableIme(true);
 
-    ImeUiCallback_Malloc = malloc;
-    ImeUiCallback_Free = free;
-    ImeUiCallback_OnChar = OnChar;
-    ImeUi_Initialize(w_hwnd);
-    ImeUi_EnableIme(true);
-
-
-    return OldProc != NULL;
-}
-
-double FI_Release()
-{
-    WNDPROC p = (WNDPROC)SetWindowLong(w_hwnd, GWL_WNDPROC, (LONG)OldProc);
-
-    if (p != NULL)
-    {
-        OldProc = NULL;
         return TRUE;
     }
-
-    ImeUi_EnableIme(false);
-    ImeUi_Uninitialize();
 
     return FALSE;
 }
 
+double FI_Release()
+{
+    UninstallWndProc();
+
+    ImeUi_EnableIme(false);
+    ImeUi_Uninitialize();
+
+    return TRUE;
+}
+
 double FI_EnableIME(double enable)
 {
-    //bool e = enable != 0;
-
-    //HIMC old_himc = ImmAssociateContext(w_hwnd, e ? ImmCreateContext() : NULL);
-
-    //if(old_himc != NULL)
-    //{
-    //    ImmDestroyContext(old_himc);
-    //}
+    ImeUi_EnableIme(enable != FALSE);
 
     return 1;
 }

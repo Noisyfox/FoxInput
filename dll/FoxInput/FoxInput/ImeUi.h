@@ -62,3 +62,5 @@ DWORD ImeUi_GetImeCursorChars();
 extern void*    (__cdecl*ImeUiCallback_Malloc)(_In_ size_t bytes);
 extern void(__cdecl*ImeUiCallback_Free)(_In_ void* ptr);
 extern void (CALLBACK*ImeUiCallback_OnChar)(_In_ WCHAR wc);
+
+extern CRITICAL_SECTION ImeUiSyncRoot;

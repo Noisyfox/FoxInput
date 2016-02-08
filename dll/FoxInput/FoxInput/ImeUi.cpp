@@ -21,6 +21,7 @@
 
 #include "ImeUi.h"
 #include <msctf.h>
+#include "AutoLock.h"
 
 // Ignore typecast warnings
 #pragma warning( disable : 4312 )
@@ -190,6 +191,8 @@ BOOL(WINAPI*_ShowReadingWindow)(HIMC himc, BOOL bShow);
 void*                           (__cdecl*ImeUiCallback_Malloc)(size_t bytes);
 void(__cdecl*ImeUiCallback_Free)(void* ptr);
 void (CALLBACK*ImeUiCallback_OnChar)(WCHAR wc);
+
+CRITICAL_SECTION ImeUiSyncRoot;
 
 static void(*_SendCompString)();
 static LRESULT(WINAPI* _SendMessage)(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) = SendMessageA;
@@ -537,6 +540,8 @@ LPARAM ImeUi_ProcessMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM& lParam,
     {
         return 0;
     }
+
+    Autolock _lock(ImeUiSyncRoot);
 
     switch (uMsg)
     {
@@ -1030,6 +1035,8 @@ bool ImeUi_Initialize(_In_  HWND hwnd, _In_ bool bDisable)
     }
     ImeUi_EnableIme(false);
 
+    InitializeCriticalSection(&ImeUiSyncRoot);
+
     return true;
 }
 
@@ -1052,6 +1059,7 @@ void ImeUi_Uninitialize()
         g_hImmDll = nullptr;
     }
     g_disableCicero.Uninitialize();
+    DeleteCriticalSection(&ImeUiSyncRoot);
     g_bInitialized = false;
 }
 
@@ -1953,6 +1961,8 @@ CTsfUiLessMode::CUIElementSink::Release()
 
 STDAPI CTsfUiLessMode::CUIElementSink::BeginUIElement(DWORD dwUIElementId, BOOL* pbShow)
 {
+    Autolock _lock(ImeUiSyncRoot);
+
     auto pElement = GetUIElement(dwUIElementId);
     if (!pElement)
         return E_INVALIDARG;
@@ -1980,6 +1990,8 @@ STDAPI CTsfUiLessMode::CUIElementSink::BeginUIElement(DWORD dwUIElementId, BOOL*
 
 STDAPI CTsfUiLessMode::CUIElementSink::UpdateUIElement(DWORD dwUIElementId)
 {
+    Autolock _lock(ImeUiSyncRoot);
+
     auto pElement = GetUIElement(dwUIElementId);
     if (!pElement)
         return E_INVALIDARG;
@@ -2005,6 +2017,8 @@ STDAPI CTsfUiLessMode::CUIElementSink::UpdateUIElement(DWORD dwUIElementId)
 
 STDAPI CTsfUiLessMode::CUIElementSink::EndUIElement(DWORD dwUIElementId)
 {
+    Autolock _lock(ImeUiSyncRoot);
+
     auto pElement = GetUIElement(dwUIElementId);
     if (!pElement)
         return E_INVALIDARG;
@@ -2076,6 +2090,8 @@ STDAPI CTsfUiLessMode::CUIElementSink::OnActivated(DWORD dwProfileType, LANGID l
     UNREFERENCED_PARAMETER(clsid);
     UNREFERENCED_PARAMETER(hkl);
 
+    Autolock _lock(ImeUiSyncRoot);
+
     static GUID s_TF_PROFILE_DAYI =
     {
         0x037B2C25, 0x480C, 0x4D7F, 0xB0, 0x27, 0xD6, 0xCA, 0x6B, 0x69, 0x78, 0x8A
@@ -2098,6 +2114,9 @@ STDAPI CTsfUiLessMode::CUIElementSink::OnActivated(DWORD dwProfileType, LANGID l
 STDAPI CTsfUiLessMode::CUIElementSink::OnChange(_In_ REFGUID rguid)
 {
     UNREFERENCED_PARAMETER(rguid);
+
+    Autolock _lock(ImeUiSyncRoot);
+
     UpdateImeState();
     return S_OK;
 }

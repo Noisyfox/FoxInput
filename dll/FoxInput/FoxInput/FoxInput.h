@@ -11,7 +11,8 @@
 #endif
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
     double FOXINPUT_API FI_Init(double hwnd);

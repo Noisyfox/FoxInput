@@ -86,6 +86,7 @@
     <Text Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AutoLock.h" />
     <ClInclude Include="FoxInput.h" />
     <ClInclude Include="ImeUi.h" />
     <ClInclude Include="resource.h" />

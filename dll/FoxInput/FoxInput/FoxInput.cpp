@@ -65,41 +65,43 @@ LRESULT CALLBACK IMEProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
     }
 
-    if (g_fullControll)
-    {
-        if (ImeUi_IsEnabled())
+    if (g_imeEnabled) {
+        if (g_fullControll)
         {
-            bool trappedData;
-            bool* trapped = &trappedData;
-            *trapped = false;
-
-            ImeUi_ProcessMessage(hWnd, message, wParam, lParam, trapped);
-            if (*trapped)
+            if (ImeUi_IsEnabled())
             {
-                return 0;
-            }
+                bool trappedData;
+                bool* trapped = &trappedData;
+                *trapped = false;
 
+                ImeUi_ProcessMessage(hWnd, message, wParam, lParam, trapped);
+                if (*trapped)
+                {
+                    return 0;
+                }
+
+                switch (message)
+                {
+                case WM_CHAR:
+                    OnChar((WCHAR)wParam);
+                    break;
+                }
+            }
+        }
+        else
+        {
             switch (message)
             {
             case WM_CHAR:
-                OnChar((WCHAR)wParam);
+                if (g_grabInput)
+                {
+                    OnChar((WCHAR)wParam);
+                }
+                break;
+            case WM_IME_COMPOSITION:
+                SetPosition();
                 break;
             }
-        }
-    }
-    else
-    {
-        switch (message)
-        {
-        case WM_CHAR:
-            if (g_grabInput)
-            {
-                OnChar((WCHAR)wParam);
-            }
-            break;
-        case WM_IME_COMPOSITION:
-            SetPosition();
-            break;
         }
     }
 

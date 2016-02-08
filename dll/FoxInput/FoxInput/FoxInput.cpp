@@ -140,3 +140,53 @@ double FI_SetIMEPosition(double x, double y)
 
     return 1;
 }
+
+double FI_EnterFullControlMode()
+{
+    return FALSE;
+}
+
+double FI_ExitFullControlMode()
+{
+    return FALSE;
+}
+
+double FI_GrabInputText(double enable)
+{
+    return FALSE;
+}
+
+double FI_RefreshData()
+{
+    return FALSE;
+}
+
+LPCSTR FI_GetIndicator()
+{
+    return "";
+}
+
+LPCSTR FI_PopInputString()
+{
+    return "";
+}
+
+double FI_GetCandidateCount()
+{
+    return 0;
+}
+
+double FI_GetCandidateSelection()
+{
+    return 0;
+}
+
+LPCSTR FI_GetCandidate(double index)
+{
+    return "";
+}
+
+LPCSTR FI_GetCompositionString()
+{
+    return "";
+}

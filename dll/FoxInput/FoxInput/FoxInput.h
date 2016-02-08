@@ -17,8 +17,29 @@ extern "C" {
     double FOXINPUT_API FI_Init(double hwnd);
     double FOXINPUT_API FI_Init_GMS(HWND hwnd);
     double FOXINPUT_API FI_Release();
+
     double FOXINPUT_API FI_EnableIME(double enable);
     double FOXINPUT_API FI_SetIMEPosition(double x, double y);
+
+    double FOXINPUT_API FI_EnterFullControlMode();
+    double FOXINPUT_API FI_ExitFullControlMode();
+
+    double FOXINPUT_API FI_GrabInputText(double enable);
+
+    // 获取最新输入法状态
+    double FOXINPUT_API FI_RefreshData();
+    // 获取输入法指示器
+    LPCSTR FOXINPUT_API FI_GetIndicator();
+    // 获取并清空输入的字符串
+    LPCSTR FOXINPUT_API FI_PopInputString();
+    // 获取候选词数量
+    double FOXINPUT_API FI_GetCandidateCount();
+    // 获取当前选定的候选词索引
+    double FOXINPUT_API FI_GetCandidateSelection();
+    // 获取指定索引的候选词
+    LPCSTR FOXINPUT_API FI_GetCandidate(double index);
+    // 获取用户输入的Composition字符串
+    LPCSTR FOXINPUT_API FI_GetCompositionString();
 
 #ifdef __cplusplus
 }

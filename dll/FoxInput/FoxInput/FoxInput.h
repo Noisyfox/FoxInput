@@ -19,19 +19,29 @@ extern "C"
     double FOXINPUT_API FI_Init_GMS(HWND hwnd);
     double FOXINPUT_API FI_Release();
 
+    // 启用、禁用输入法。
+    // 当输入法被禁用时，所有输入法操作均无效
+    // 包括对用户输入的监听
+    // 同时此时任何输入法都只能输入英文
     double FOXINPUT_API FI_EnableIME(double enable);
+    // 设置系统输入法窗口位置，仅在非完整控制模式下有效
     double FOXINPUT_API FI_SetIMEPosition(double x, double y);
 
+    // 进入、退出完整控制模式
+    // 在完整控制模式下将不会显示系统自带输入法窗口
+    // 且所有获取输入法状态的函数将会生效
     double FOXINPUT_API FI_EnterFullControlMode();
     double FOXINPUT_API FI_ExitFullControlMode();
 
+    // 设置本插件是否需要读取用户输入
+    // 当开启完整控制模式时该选项强制开启
     double FOXINPUT_API FI_GrabInputText(double enable);
 
     // 获取最新输入法状态
     double FOXINPUT_API FI_RefreshData();
     // 获取输入法指示器
     LPCSTR FOXINPUT_API FI_GetIndicator();
-    // 获取并清空输入的字符串
+    // 获取并清空输入的字符串，本函数可在非完整模式下生效，只要设置了 GrabInputText = true
     LPCSTR FOXINPUT_API FI_PopInputString();
     // 获取候选词数量
     double FOXINPUT_API FI_GetCandidateCount();

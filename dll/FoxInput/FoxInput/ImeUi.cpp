@@ -20,9 +20,7 @@
 #define SAFE_RELEASE(p)      { if (p) { (p)->Release(); (p)=NULL; } }
 
 #include "ImeUi.h"
-#include <math.h>
 #include <msctf.h>
-#include <malloc.h>
 
 // Ignore typecast warnings
 #pragma warning( disable : 4312 )
@@ -67,40 +65,6 @@
 #define IMEID_CHS_VER53	( LANG_CHS | MAKEIMEVERSION( 5, 3 ) )	// MSPY3	// WinXP
 
 static CHAR signature[] = "%%%IMEUILIB:070111%%%";
-
-static IMEUI_APPEARANCE         gSkinIME =
-{
-    0,			// symbolColor;
-    0x404040,   // symbolColorOff;
-    0xff000000,	// symbolColorText;
-    24,			// symbolHeight;
-    0xa0,		// symbolTranslucence;
-    0,			// symbolPlacement;
-    nullptr,	// symbolFont;
-    0xffffffff,	// candColorBase;
-    0xff000000,	// candColorBorder;
-    0,			// candColorText;
-    0x00ffff00,	// compColorInput;
-    0x000000ff,	// compColorTargetConv;
-    0x0000ff00,	// compColorConverted;
-    0x00ff0000,	// compColorTargetNotConv;
-    0x00ff0000,	// compColorInputErr;
-    0x80,		// compTranslucence;
-    0,			// compColorText;
-    2,			// caretWidth;
-    1,			// caretYMargin;
-};
-
-struct _SkinCompStr
-{
-    DWORD colorInput;
-    DWORD colorTargetConv;
-    DWORD colorConverted;
-    DWORD colorTargetNotConv;
-    DWORD colorInputErr;
-};
-
-_SkinCompStr                    gSkinCompStr;
 
 // Definition from Win98DDK version of IMM.H
 typedef struct
@@ -223,8 +187,6 @@ UINT(WINAPI*_GetReadingString)(HIMC himc, UINT uReadingBufLen, LPWSTR lpwReading
 BOOL(WINAPI*_ShowReadingWindow)(HIMC himc, BOOL bShow);
 
 // Callbacks
-void (CALLBACK*ImeUiCallback_DrawRect)(int x1, int y1, int x2, int y2, DWORD color);
-void (CALLBACK*ImeUiCallback_DrawFans)(const IMEUI_VERTEX* paVertex, UINT uNum);
 void*                           (__cdecl*ImeUiCallback_Malloc)(size_t bytes);
 void(__cdecl*ImeUiCallback_Free)(void* ptr);
 void (CALLBACK*ImeUiCallback_OnChar)(WCHAR wc);
@@ -251,21 +213,17 @@ static TCHAR g_szMultiLineCompString[256 * (3 - sizeof(TCHAR))];
 static bool                     g_bReadingWindow = false;
 static bool                     g_bHorizontalReading = false;
 static bool                     g_bVerticalCand = true;
-static UINT                     g_uCaretBlinkTime = 0;
 static UINT                     g_uCaretBlinkLast = 0;
 static bool                     g_bCaretDraw = false;
 static bool                     g_bChineseIME;
 static bool                     g_bInsertMode = true;
 static TCHAR g_szReadingString[32];	// Used only in case of horizontal reading window
 static int                      g_iReadingError;	// Used only in case of horizontal reading window
-static UINT                     g_screenWidth, g_screenHeight;
 static DWORD                    g_dwPrevFloat;
 static bool                     bIsSendingKeyMessage = false;
 static OSVERSIONINFOA           g_osi;
 static bool                     g_bInitialized = false;
 static bool                     g_bCandList = false;
-static DWORD                    g_dwCandX, g_dwCandY;
-static DWORD                    g_dwCaretX, g_dwCaretY;
 static DWORD                    g_hCompChar;
 static int                      g_iCandListIndexBase;
 static DWORD                    g_dwImeUiFlags = IMEUI_FLAG_SUPPORT_CARET;
@@ -274,17 +232,6 @@ static HMODULE                  g_hImmDll = nullptr;
 
 #define IsNT() (g_osi.dwPlatformId == VER_PLATFORM_WIN32_NT)
 
-struct CompStringAttribute
-{
-    UINT caretX;
-    UINT caretY;
-    CImeUiFont_Base* pFont;
-    DWORD colorComp;
-    DWORD colorCand;
-    RECT margins;
-};
-
-static CompStringAttribute      g_CaretInfo;
 static DWORD                    g_dwState = IMEUI_STATE_OFF;
 static DWORD                    swirl = 0;
 static double                   lastSwirl;
@@ -317,9 +264,6 @@ static LPTSTR                   g_pszIndicatior = g_aszIndicator[0];
 static void GetReadingString(_In_ HWND hWnd);
 static DWORD GetImeId(_In_ UINT uIndex = 0);
 static void CheckToggleState();
-static void DrawImeIndicator();
-static void DrawCandidateList();
-static void DrawCompositionString(_In_ bool bDrawCompAttr);
 static void GetReadingWindowOrientation(_In_ DWORD dwId);
 static void OnInputLangChangeWorker();
 static void OnInputLangChange();
@@ -563,659 +507,6 @@ static void InitCompStringData()
     g_IMECursorChars = 0;
     memset(&g_szCompositionString, 0, sizeof(g_szCompositionString));
     memset(&g_szCompAttrString, 0, sizeof(g_szCompAttrString));
-}
-
-static void DrawCaret(DWORD x, DWORD y, DWORD height)
-{
-    if (g_bCaretDraw && ImeUiCallback_DrawRect)
-        ImeUiCallback_DrawRect(x, y + gSkinIME.caretYMargin, x + gSkinIME.caretWidth,
-            y + height - gSkinIME.caretYMargin, g_CaretInfo.colorComp);
-}
-
-//
-// Apps that draw the composition string on top of composition string attribute
-// in level 3 support should call this function twice in rendering a frame.
-//     // Draw edit box UI;
-//     ImeUi_RenderUI(true, false);	// paint composition string attribute;
-//     // Draw text in the edit box;
-//     ImeUi_RenderUi(false, true); // paint the rest of IME UI;
-//
-void ImeUi_RenderUI(_In_ bool bDrawCompAttr, _In_ bool bDrawOtherUi)
-{
-    if (!g_bInitialized || !g_bImeEnabled || !g_CaretInfo.pFont)
-        return;
-    if (!bDrawCompAttr && !bDrawOtherUi)
-        return;	// error case
-    if (g_dwIMELevel == 2)
-    {
-        if (!bDrawOtherUi)
-            return;	// 1st call for level 3 support
-    }
-
-    if (bDrawOtherUi)
-        DrawImeIndicator();
-
-    DrawCompositionString(bDrawCompAttr);
-
-    if (bDrawOtherUi)
-        DrawCandidateList();
-}
-
-static void DrawImeIndicator()
-{
-    bool bOn = g_dwState != IMEUI_STATE_OFF;
-
-    IMEUI_VERTEX PieData[17];
-    float SizeOfPie = (float)gSkinIME.symbolHeight;
-
-    memset(PieData, 0, sizeof(PieData));
-
-    switch (gSkinIME.symbolPlacement)
-    {
-    case 0: // vertical centering IME indicator
-    {
-        if (SizeOfPie + g_CaretInfo.margins.right + 4 > g_screenWidth)
-        {
-            PieData[0].sx = (-SizeOfPie / 2) + g_CaretInfo.margins.left - 4;
-            PieData[0].sy = (float)g_CaretInfo.margins.top + (g_CaretInfo.margins.bottom -
-                g_CaretInfo.margins.top) / 2;
-        }
-        else
-        {
-            PieData[0].sx = -(SizeOfPie / 2) + g_CaretInfo.margins.right + gSkinIME.symbolHeight + 4;
-            PieData[0].sy = (float)g_CaretInfo.margins.top + (g_CaretInfo.margins.bottom -
-                g_CaretInfo.margins.top) / 2;
-        }
-        break;
-    }
-    case 1: // upperleft
-        PieData[0].sx = 4 + (SizeOfPie / 2);
-        PieData[0].sy = 4 + (SizeOfPie / 2);
-        break;
-    case 2: // upperright
-        PieData[0].sx = g_screenWidth - (4 + (SizeOfPie / 2));
-        PieData[0].sy = 4 + (SizeOfPie / 2);
-        break;
-    case 3: // lowerright
-        PieData[0].sx = g_screenWidth - (4 + (SizeOfPie / 2));
-        PieData[0].sy = g_screenHeight - (4 + (SizeOfPie / 2));
-        break;
-    case 4: // lowerleft
-        PieData[0].sx = 4 + (SizeOfPie / 2);
-        PieData[0].sy = g_screenHeight - (4 + (SizeOfPie / 2));
-        break;
-    }
-    PieData[0].rhw = 1.0f;
-    if (bOn)
-    {
-        if (GetTickCount() - lastSwirl > 250)
-        {
-            swirl++;
-            lastSwirl = GetTickCount();
-            if (swirl > 13)
-                swirl = 0;
-        }
-    }
-    else
-        swirl = 0;
-    for (int t1 = 1; t1 < 16; t1++)
-    {
-        float radian = 2.0f * 3.1415926f * (t1 - 1 + (DWORD(bOn) * swirl)) / 14.0f;
-        PieData[t1].sx = (float)(PieData[0].sx + SizeOfPie / 2 * cos(radian));
-        PieData[t1].sy = (float)(PieData[0].sy + SizeOfPie / 2 * sin(radian));
-        PieData[t1].rhw = 1.0f;
-    }
-
-    PieData[0].color = 0xffffff + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-    if (!gSkinIME.symbolColor && bOn)
-    {
-        {
-            PieData[1].color = 0xff0000 + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[2].color = 0xff3000 + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[3].color = 0xff6000 + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[4].color = 0xff9000 + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[5].color = 0xffC000 + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[6].color = 0xffff00 + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[7].color = 0xC0ff00 + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[8].color = 0x90ff00 + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[9].color = 0x60ff00 + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[10].color = 0x30c0ff + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[11].color = 0x00a0ff + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[12].color = 0x3090ff + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[13].color = 0x6060ff + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[14].color = 0x9030ff + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-            PieData[15].color = 0xc000ff + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-        }
-    }
-    else
-    {
-        DWORD dwColor = bOn ? gSkinIME.symbolColor : gSkinIME.symbolColorOff;
-        for (int t1 = 1; t1 < 16; t1++)
-        {
-            PieData[t1].color = dwColor + (((DWORD)gSkinIME.symbolTranslucence) << 24);
-        }
-    }
-    PieData[16] = PieData[1];
-
-    if (ImeUiCallback_DrawFans)
-        ImeUiCallback_DrawFans(PieData, 17);
-
-    float fHeight = gSkinIME.symbolHeight * 0.625f;
-
-    // fix for Ent Gen #120 - reduce the height of character when Korean IME is on
-    if (GETPRIMLANG() == LANG_KOREAN && bOn)
-    {
-        fHeight *= 0.8f;
-    }
-
-    if (gSkinIME.symbolFont)
-    {
-#ifdef DS2
-        // save the font height here since DS2 shares editbox font and indicator font
-        DWORD _w, _h;
-        g_CaretInfo.pFont->GetTextExtent(TEXT(" "), &_w, &_h);
-#endif //DS2
-
-        // GOS deals height in points that is 1/72nd inch and assumes display device is 96dpi.
-        fHeight = fHeight * 96 / 72;
-        gSkinIME.symbolFont->SetHeight((UINT)fHeight);
-        gSkinIME.symbolFont->SetColor((((DWORD)gSkinIME.symbolTranslucence) << 24) | gSkinIME.symbolColorText);
-
-        //
-        // draw the proper symbol over the fan
-        //
-        DWORD w, h;
-        LPCTSTR cszSymbol = (g_dwState == IMEUI_STATE_ON) ? g_pszIndicatior : g_aszIndicator[0];
-
-        gSkinIME.symbolFont->GetTextExtent(cszSymbol, &w, &h);
-        gSkinIME.symbolFont->SetPosition((int)(PieData[0].sx) - w / 2, (int)(PieData[0].sy) - h / 2);
-        gSkinIME.symbolFont->DrawText(cszSymbol);
-
-#ifdef DS2
-        // revert the height.
-        g_CaretInfo.pFont->SetHeight(_h);
-
-        // Double-check: Confirm match by testing a range of font heights to find best fit
-        DWORD _h2;
-        g_CaretInfo.pFont->GetTextExtent(TEXT(" "), &_w, &_h2);
-        if (_h2 < _h)
-        {
-            for (int i = 1; _h2<_h && i<10; i++)
-            {
-                g_CaretInfo.pFont->SetHeight(_h + i);
-                g_CaretInfo.pFont->GetTextExtent(TEXT(" "), &_w, &_h2);
-            }
-        }
-        else if (_h2 > _h)
-        {
-            for (int i = 1; _h2>_h && i<10; i++)
-            {
-                g_CaretInfo.pFont->SetHeight(_h - i);
-                g_CaretInfo.pFont->GetTextExtent(TEXT(" "), &_w, &_h2);
-            }
-        }
-#endif //DS2
-    }
-}
-
-static void DrawCompositionString(_In_ bool bDrawCompAttr)
-{
-    // Process timer for caret blink
-    UINT uCurrentTime = GetTickCount();
-    if (uCurrentTime - g_uCaretBlinkLast > g_uCaretBlinkTime)
-    {
-        g_uCaretBlinkLast = uCurrentTime;
-        g_bCaretDraw = !g_bCaretDraw;
-    }
-
-    int i = 0;
-
-    g_CaretInfo.pFont->SetColor(g_CaretInfo.colorComp);
-
-    DWORD uDummy;
-
-    int len = (int)wcslen(g_szCompositionString);
-
-    DWORD bgX = g_CaretInfo.caretX;
-    DWORD bgY = g_CaretInfo.caretY;
-    g_dwCaretX = POSITION_UNINITIALIZED;
-    g_dwCaretY = POSITION_UNINITIALIZED;
-    DWORD candX = POSITION_UNINITIALIZED;
-    DWORD candY = 0;
-    LPTSTR pszMlcs = g_szMultiLineCompString;
-
-    DWORD wCompChar = 0;
-    DWORD hCompChar = 0;
-    g_CaretInfo.pFont->GetTextExtent(TEXT(" "), &uDummy, &hCompChar);
-    if (g_dwIMELevel == 3 && g_IMECursorBytes && g_szCompositionString[0])
-    {
-        // shift starting point of drawing composition string according to the current caret position.
-        TCHAR temp = g_szCompositionString[g_IMECursorBytes];
-        g_szCompositionString[g_IMECursorBytes] = 0;
-        g_CaretInfo.pFont->GetTextExtent(g_szCompositionString, &wCompChar, &hCompChar);
-        g_szCompositionString[g_IMECursorBytes] = temp;
-        bgX -= wCompChar;
-    }
-
-    //
-    // Draw the background colors for IME text nuggets
-    //
-    bool saveCandPos = false;
-    DWORD cType = 1;
-    LPTSTR pszCurrentCompLine = g_szCompositionString;
-    DWORD dwCompLineStart = bgX;
-    DWORD bgXnext = bgX;
-
-    if (GETPRIMLANG() != LANG_KOREAN || g_bCaretDraw)	// Korean uses composition attribute as blinking block caret
-        for (i = 0; i < len; i += cType)
-        {
-            DWORD bgColor = 0x00000000;
-            TCHAR szChar[3];
-            szChar[0] = g_szCompositionString[i];
-            szChar[1] = szChar[2] = 0;
-            bgX = bgXnext;
-            TCHAR cSave = g_szCompositionString[i + cType];
-            g_szCompositionString[i + cType] = 0;
-            g_CaretInfo.pFont->GetTextExtent(pszCurrentCompLine, &bgXnext, &hCompChar);
-            g_szCompositionString[i + cType] = cSave;
-            bgXnext += dwCompLineStart;
-            wCompChar = bgXnext - bgX;
-
-            switch (g_szCompAttrString[i])
-            {
-            case ATTR_INPUT:
-                bgColor = gSkinCompStr.colorInput;
-                break;
-            case ATTR_TARGET_CONVERTED:
-                bgColor = gSkinCompStr.colorTargetConv;
-                if (IMEID_LANG(GetImeId()) != LANG_CHS)
-                    saveCandPos = true;
-                break;
-            case ATTR_CONVERTED:
-                bgColor = gSkinCompStr.colorConverted;
-                break;
-            case ATTR_TARGET_NOTCONVERTED:
-                //
-                // This is the one the user is working with currently
-                //
-                bgColor = gSkinCompStr.colorTargetNotConv;
-                break;
-            case ATTR_INPUT_ERROR:
-                bgColor = gSkinCompStr.colorInputErr;
-                break;
-            default:
-                // STOP( TEXT( "Attributes on IME characters are wrong" ) );
-                break;
-            }
-
-            if (g_dwIMELevel == 3 && bDrawCompAttr)
-            {
-                if ((LONG)bgX >= g_CaretInfo.margins.left && (LONG)bgX <= g_CaretInfo.margins.right)
-                {
-                    if (g_dwImeUiFlags & IMEUI_FLAG_SUPPORT_CARET)
-                    {
-                        if (ImeUiCallback_DrawRect)
-                            ImeUiCallback_DrawRect(bgX, bgY, bgX + wCompChar, bgY + hCompChar, bgColor);
-                    }
-                    else
-                    {
-                        if (ImeUiCallback_DrawRect)
-                            ImeUiCallback_DrawRect(bgX - wCompChar, bgY, bgX, bgY + hCompChar, bgColor);
-                    }
-                }
-            }
-            else if (g_dwIMELevel == 2)
-            {
-                // make sure enough buffer space (possible space, NUL for current line, possible DBCS, 2 more NUL) 
-                // are available in multiline composition string buffer
-                bool bWrite = (pszMlcs - g_szMultiLineCompString <
-                    COUNTOF(g_szMultiLineCompString) - 5 * (3 - sizeof(TCHAR)));
-
-                if ((LONG)(bgX + wCompChar) >= g_CaretInfo.margins.right)
-                {
-                    bgX = dwCompLineStart = bgXnext = g_CaretInfo.margins.left;
-                    bgY = bgY + hCompChar;
-                    pszCurrentCompLine = g_szCompositionString + i;
-                    if (bWrite)
-                    {
-                        if (pszMlcs == g_szMultiLineCompString || pszMlcs[-1] == 0)
-                            *pszMlcs++ = ' ';	// to avoid zero length line
-                        *pszMlcs++ = 0;
-                    }
-                }
-                if (ImeUiCallback_DrawRect)
-                    ImeUiCallback_DrawRect(bgX, bgY, bgX + wCompChar, bgY + hCompChar, bgColor);
-                if (bWrite)
-                {
-                    *pszMlcs++ = g_szCompositionString[i];
-                }
-                if ((DWORD)i == g_IMECursorBytes)
-                {
-                    g_dwCaretX = bgX;
-                    g_dwCaretY = bgY;
-                }
-            }
-            if ((saveCandPos && candX == POSITION_UNINITIALIZED) ||
-                (IMEID_LANG(GetImeId()) == LANG_CHS && i / (3 - sizeof(TCHAR)) == (int)g_IMECursorChars))
-            {
-                candX = bgX;
-                candY = bgY;
-            }
-            saveCandPos = false;
-        }
-
-    bgX = bgXnext;
-    if (g_dwIMELevel == 2)
-    {
-        // in case the caret in composition string is at the end of it, draw it here
-        if (len != 0 && (DWORD)i == g_IMECursorBytes)
-        {
-            g_dwCaretX = bgX;
-            g_dwCaretY = bgY;
-        }
-
-        // Draw composition string.
-        //assert(pszMlcs - g_szMultiLineCompString <=
-        //			sizeof(g_szMultiLineCompString) / sizeof(g_szMultiLineCompString[0]) - 2);
-        *pszMlcs++ = 0;
-        *pszMlcs++ = 0;
-        DWORD x, y;
-        x = g_CaretInfo.caretX;
-        y = g_CaretInfo.caretY;
-        pszMlcs = g_szMultiLineCompString;
-        while (*pszMlcs &&
-            pszMlcs - g_szMultiLineCompString < sizeof(g_szMultiLineCompString) / sizeof
-            (g_szMultiLineCompString[0]))
-        {
-            g_CaretInfo.pFont->SetPosition(x, y);
-            g_CaretInfo.pFont->DrawText(pszMlcs);
-            pszMlcs += wcslen(pszMlcs) + 1;
-            x = g_CaretInfo.margins.left;
-            y += hCompChar;
-        }
-    }
-    // for changing z-order of caret
-    if (g_dwCaretX != POSITION_UNINITIALIZED && g_dwCaretY != POSITION_UNINITIALIZED)
-    {
-        DrawCaret(g_dwCaretX, g_dwCaretY, hCompChar);
-    }
-    g_dwCandX = candX;
-    g_dwCandY = candY;
-    g_hCompChar = hCompChar;
-}
-
-static void DrawCandidateList()
-{
-    assert(g_CaretInfo.pFont != nullptr);
-    _Analysis_assume_(g_CaretInfo.pFont != nullptr);
-    DWORD candX = g_dwCandX;
-    DWORD candY = g_dwCandY;
-    DWORD hCompChar = g_hCompChar;
-    int i;
-
-    // draw candidate list / reading window
-    if (!g_dwCount || g_szCandidate[0][0] == 0)
-    {
-        return;
-    }
-
-    // If position of candidate list is not initialized yet, set it here.
-    if (candX == POSITION_UNINITIALIZED)
-    {
-        // CHT IME in Vista doesn't have ATTR_TARGET_CONVERTED attribute while typing, 
-        // so display the candidate list near the caret in the composition string
-        if (GETLANG() == LANG_CHT && GetImeId() != 0 && g_dwCaretX != POSITION_UNINITIALIZED)
-        {
-            candX = g_dwCaretX;
-            candY = g_dwCaretY;
-        }
-        else
-        {
-            candX = g_CaretInfo.caretX;
-            candY = g_CaretInfo.caretY;
-        }
-    }
-
-    SIZE largest =
-    {
-        0,0
-    };
-
-    static DWORD uDigitWidth = 0;
-    DWORD uSpaceWidth = 0;
-    static DWORD uDigitWidthList[10];
-    static CImeUiFont_Base* pPrevFont = nullptr;
-    // find out the widest width of the digits
-    if (pPrevFont != g_CaretInfo.pFont)
-    {
-        pPrevFont = g_CaretInfo.pFont;
-        for (int cnt = 0; cnt <= 9; cnt++)
-        {
-            DWORD uDW = 0;
-            DWORD uDH = 0;
-            TCHAR ss[8];
-            swprintf_s(ss, COUNTOF(ss), TEXT("%d"), cnt);
-            g_CaretInfo.pFont->GetTextExtent(ss, &uDW, &uDH);
-            uDigitWidthList[cnt] = uDW;
-            if (uDW > uDigitWidth)
-                uDigitWidth = uDW;
-            if ((signed)uDH > largest.cy)
-                largest.cy = uDH;
-        }
-    }
-    uSpaceWidth = uDigitWidth;
-    DWORD dwMarginX = (uSpaceWidth + 1) / 2;
-    DWORD adwCandWidth[MAX_CANDLIST];
-
-    // Find out the widest width of the candidate strings
-    DWORD dwCandWidth = 0;
-    if (g_bReadingWindow && g_bHorizontalReading)
-        g_CaretInfo.pFont->GetTextExtent(g_szReadingString, (DWORD*)&largest.cx, (DWORD*)&largest.cy);
-    else
-    {
-        for (i = 0; g_szCandidate[i][0] && i < (int)g_uCandPageSize; i++)
-        {
-            DWORD tx = 0;
-            DWORD ty = 0;
-
-            if (g_bReadingWindow)
-                g_CaretInfo.pFont->GetTextExtent(g_szCandidate[i], &tx, &ty);
-            else
-            {
-                if (g_bVerticalCand)
-                    g_CaretInfo.pFont->GetTextExtent(g_szCandidate[i] + 2, &tx, &ty);
-                else
-                    g_CaretInfo.pFont->GetTextExtent(g_szCandidate[i] + 1, &tx, &ty);
-                tx = tx + uDigitWidth + uSpaceWidth;
-            }
-
-            if ((signed)tx > largest.cx)
-                largest.cx = tx;
-            if ((signed)ty > largest.cy)
-                largest.cy = ty;
-            adwCandWidth[i] = tx;
-            dwCandWidth += tx;
-        }
-    }
-
-    DWORD slotsUsed;
-    if (g_bReadingWindow && g_dwCount < g_uCandPageSize)
-        slotsUsed = g_dwCount;
-    else
-        slotsUsed = g_uCandPageSize;
-
-    // Show candidate list above composition string if there isn't enough room below.
-    DWORD dwCandHeight;
-    if (g_bVerticalCand && !(g_bReadingWindow && g_bHorizontalReading))
-        dwCandHeight = slotsUsed * largest.cy + 2;
-    else
-        dwCandHeight = largest.cy + 2;
-    if (candY + hCompChar + dwCandHeight > g_screenHeight)
-        candY -= dwCandHeight;
-    else
-        candY += hCompChar;
-    if ((int)candY < 0)
-        candY = 0;
-
-    // Move candidate list horizontally to keep it inside of screen
-    if (!g_bReadingWindow && IMEID_LANG(GetImeId()) == LANG_CHS)
-        dwCandWidth += dwMarginX * (slotsUsed - 1);
-    else if (g_bReadingWindow && g_bHorizontalReading)
-        dwCandWidth = largest.cx + 2 + dwMarginX * 2;
-    else if (g_bVerticalCand || g_bReadingWindow)
-        dwCandWidth = largest.cx + 2 + dwMarginX * 2;
-    else
-        dwCandWidth = slotsUsed * (largest.cx + 1) + 1;
-    if (candX + dwCandWidth > g_screenWidth)
-        candX = g_screenWidth - dwCandWidth;
-    if ((int)candX < 0)
-        candX = 0;
-
-    // Draw frame and background of candidate list / reading window
-    int seperateLineX = 0;
-    int left = candX;
-    int top = candY;
-    int right = candX + dwCandWidth;
-    int bottom = candY + dwCandHeight;
-    if (ImeUiCallback_DrawRect)
-        ImeUiCallback_DrawRect(left, top, right, bottom, gSkinIME.candColorBorder);
-    left++;
-    top++;
-    right--;
-    bottom--;
-    if (g_bReadingWindow || IMEID_LANG(GetImeId()) == LANG_CHS)
-    {
-        if (ImeUiCallback_DrawRect)
-            ImeUiCallback_DrawRect(left, top, right, bottom, gSkinIME.candColorBase);
-    }
-    else if (g_bVerticalCand)
-    {
-        // uDigitWidth is the max width of all digits. 
-        if (!g_bReadingWindow)
-        {
-            seperateLineX = left + dwMarginX + uDigitWidth + uSpaceWidth / 2;
-            if (ImeUiCallback_DrawRect)
-            {
-                ImeUiCallback_DrawRect(left, top, seperateLineX - 1, bottom, gSkinIME.candColorBase);
-                ImeUiCallback_DrawRect(seperateLineX, top, right, bottom, gSkinIME.candColorBase);
-            }
-        }
-    }
-    else
-    {
-        for (i = 0; (DWORD)i < slotsUsed; i++)
-        {
-            if (ImeUiCallback_DrawRect)
-                ImeUiCallback_DrawRect(left, top, left + largest.cx, bottom, gSkinIME.candColorBase);
-            left += largest.cx + 1;
-        }
-    }
-
-    // Draw candidates / reading strings
-    candX++;
-    candY++;
-    if (g_bReadingWindow && g_bHorizontalReading)
-    {
-        int iStart = -1, iEnd = -1, iDummy;
-        candX += dwMarginX;
-
-        // draw background of error character if it exists
-        TCHAR szTemp[COUNTOF(g_szReadingString)];
-        if (g_iReadingError >= 0)
-        {
-            wcscpy_s(szTemp, COUNTOF(szTemp), g_szReadingString);
-            LPTSTR psz = szTemp + g_iReadingError;
-            psz++;
-            *psz = 0;
-            g_CaretInfo.pFont->GetTextExtent(szTemp, (DWORD*)&iEnd, (DWORD*)&iDummy);
-            TCHAR cSave = szTemp[g_iReadingError];
-            szTemp[g_iReadingError] = 0;
-            g_CaretInfo.pFont->GetTextExtent(szTemp, (DWORD*)&iStart, (DWORD*)&iDummy);
-            szTemp[g_iReadingError] = cSave;
-            if (ImeUiCallback_DrawRect)
-                ImeUiCallback_DrawRect(candX + iStart, candY, candX + iEnd, candY + largest.cy,
-                    gSkinIME.candColorBorder);
-        }
-
-        g_CaretInfo.pFont->SetPosition(candX, candY);
-        g_CaretInfo.pFont->SetColor(g_CaretInfo.colorCand);
-        g_CaretInfo.pFont->DrawText(g_szReadingString);
-
-        // draw error character if it exists
-        if (iStart >= 0)
-        {
-            g_CaretInfo.pFont->SetPosition(candX + iStart, candY);
-            if (gSkinIME.candColorBase != 0xffffffff || gSkinIME.candColorBorder != 0xff000000)
-                g_CaretInfo.pFont->SetColor(g_CaretInfo.colorCand);
-            else
-                g_CaretInfo.pFont->SetColor(0xff000000 + (~((0x00ffffff) & g_CaretInfo.colorCand)));
-            g_CaretInfo.pFont->DrawText(szTemp + g_iReadingError);
-        }
-    }
-    else
-    {
-        for (i = 0; i < (int)g_uCandPageSize && (DWORD)i < g_dwCount; i++)
-        {
-            if (g_dwSelection == (DWORD)i)
-            {
-                if (gSkinIME.candColorBase != 0xffffffff || gSkinIME.candColorBorder != 0xff000000)
-                    g_CaretInfo.pFont->SetColor(g_CaretInfo.colorCand);
-                else
-                    g_CaretInfo.pFont->SetColor(0xff000000 + (~((0x00ffffff) & g_CaretInfo.colorCand)));
-
-                if (ImeUiCallback_DrawRect)
-                {
-                    if (g_bReadingWindow || g_bVerticalCand)
-                        ImeUiCallback_DrawRect(candX, candY + i * largest.cy,
-                            candX - 1 + dwCandWidth, candY + (i + 1) * largest.cy,
-                            gSkinIME.candColorBorder);
-                    else
-                        ImeUiCallback_DrawRect(candX, candY,
-                            candX + adwCandWidth[i], candY + largest.cy,
-                            gSkinIME.candColorBorder);
-                }
-            }
-            else
-                g_CaretInfo.pFont->SetColor(g_CaretInfo.colorCand);
-            if (g_szCandidate[i][0] != 0)
-            {
-                if (!g_bReadingWindow && g_bVerticalCand)
-                {
-                    TCHAR szOneDigit[2] =
-                    {
-                        g_szCandidate[i][0], 0
-                    };
-                    int nOneDigit = g_szCandidate[i][0] - TEXT('0');
-                    TCHAR* szCandidateBody = g_szCandidate[i] + 2;
-
-                    int dx = candX + (seperateLineX - candX - uDigitWidthList[nOneDigit]) / 2;
-                    int dy = candY + largest.cy * i;
-
-                    g_CaretInfo.pFont->SetPosition(dx, dy);
-                    g_CaretInfo.pFont->DrawText(szOneDigit);
-                    g_CaretInfo.pFont->SetPosition(seperateLineX + dwMarginX, dy);
-                    g_CaretInfo.pFont->DrawText(szCandidateBody);
-                }
-                else if (g_bReadingWindow)
-                {
-                    g_CaretInfo.pFont->SetPosition(dwMarginX + candX, candY + i * largest.cy);
-                    g_CaretInfo.pFont->DrawText(g_szCandidate[i]);
-                }
-                else
-                {
-                    g_CaretInfo.pFont->SetPosition(uSpaceWidth / 2 + candX, candY);
-                    g_CaretInfo.pFont->DrawText(g_szCandidate[i]);
-                }
-            }
-            if (!g_bReadingWindow && !g_bVerticalCand)
-            {
-                if (IMEID_LANG(GetImeId()) == LANG_CHS)
-                    candX += adwCandWidth[i] + dwMarginX;
-                else
-                    candX += largest.cx + 1;
-            }
-        }
-    }
 }
 
 static void CloseCandidateList()
@@ -1573,33 +864,6 @@ LPARAM ImeUi_ProcessMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM& lParam,
 }
 #pragma warning(pop)
 
-_Use_decl_annotations_
-void ImeUi_SetCaretPosition(UINT x, UINT y)
-{
-    if (!g_bInitialized)
-        return;
-    g_CaretInfo.caretX = x;
-    g_CaretInfo.caretY = y;
-}
-
-_Use_decl_annotations_
-void ImeUi_SetCompStringAppearance(CImeUiFont_Base* pFont, DWORD color, const RECT* prc)
-{
-    if (!g_bInitialized)
-        return;
-    g_CaretInfo.pFont = pFont;
-    g_CaretInfo.margins = *prc;
-
-    if (0 == gSkinIME.candColorText)
-        g_CaretInfo.colorCand = color;
-    else
-        g_CaretInfo.colorCand = gSkinIME.candColorText;
-    if (0 == gSkinIME.compColorText)
-        g_CaretInfo.colorComp = color;
-    else
-        g_CaretInfo.colorComp = gSkinIME.compColorText;
-}
-
 void ImeUi_SetState(_In_ DWORD dwState)
 {
     if (!g_bInitialized)
@@ -1751,18 +1015,6 @@ bool ImeUi_Initialize(_In_  HWND hwnd, _In_ bool bDisable)
         g_bInitialized = bDisable;
         return false;
     }
-
-    g_uCaretBlinkTime = GetCaretBlinkTime();
-
-    g_CaretInfo.caretX = 0;
-    g_CaretInfo.caretY = 0;
-    g_CaretInfo.pFont = 0;
-    g_CaretInfo.colorComp = 0;
-    g_CaretInfo.colorCand = 0;
-    g_CaretInfo.margins.left = 0;
-    g_CaretInfo.margins.right = 640;
-    g_CaretInfo.margins.top = 0;
-    g_CaretInfo.margins.bottom = 480;
 
     CheckInputLocale();
     OnInputLangChangeWorker();
@@ -2238,17 +1490,6 @@ void ImeUi_FinalizeString(_In_ bool bSend)
     return;
 }
 
-static void SetCompStringColor()
-{
-    // change color setting according to current IME level.
-    DWORD dwTranslucency = (g_dwIMELevel == 2) ? 0xff000000 : ((DWORD)gSkinIME.compTranslucence << 24);
-    gSkinCompStr.colorInput = dwTranslucency | gSkinIME.compColorInput;
-    gSkinCompStr.colorTargetConv = dwTranslucency | gSkinIME.compColorTargetConv;
-    gSkinCompStr.colorConverted = dwTranslucency | gSkinIME.compColorConverted;
-    gSkinCompStr.colorTargetNotConv = dwTranslucency | gSkinIME.compColorTargetNotConv;
-    gSkinCompStr.colorInputErr = dwTranslucency | gSkinIME.compColorInputErr;
-}
-
 static void SetSupportLevel(_In_ DWORD dwImeLevel)
 {
     if (dwImeLevel < 2 || 3 < dwImeLevel)
@@ -2260,7 +1501,6 @@ static void SetSupportLevel(_In_ DWORD dwImeLevel)
     g_dwIMELevel = dwImeLevel;
     // cancel current composition string.
     ImeUi_FinalizeString();
-    SetCompStringColor();
 }
 
 void ImeUi_SetSupportLevel(_In_ DWORD dwImeLevel)
@@ -2269,37 +1509,6 @@ void ImeUi_SetSupportLevel(_In_ DWORD dwImeLevel)
         return;
     g_dwIMELevelSaved = dwImeLevel;
     SetSupportLevel(dwImeLevel);
-}
-
-void ImeUi_SetAppearance(_In_opt_ const IMEUI_APPEARANCE* pia)
-{
-    if (!g_bInitialized || !pia)
-        return;
-    gSkinIME = *pia;
-    gSkinIME.symbolColor &= 0xffffff; // mask translucency
-    gSkinIME.symbolColorOff &= 0xffffff; // mask translucency
-    gSkinIME.symbolColorText &= 0xffffff; // mask translucency
-    gSkinIME.compColorInput &= 0xffffff; // mask translucency
-    gSkinIME.compColorTargetConv &= 0xffffff; // mask translucency
-    gSkinIME.compColorConverted &= 0xffffff; // mask translucency
-    gSkinIME.compColorTargetNotConv &= 0xffffff; // mask translucency
-    gSkinIME.compColorInputErr &= 0xffffff; // mask translucency
-    SetCompStringColor();
-}
-
-void ImeUi_GetAppearance(_Out_opt_ IMEUI_APPEARANCE* pia)
-{
-    if (pia)
-    {
-        if (g_bInitialized)
-        {
-            *pia = gSkinIME;
-        }
-        else
-        {
-            memset(pia, 0, sizeof(IMEUI_APPEARANCE));
-        }
-    }
 }
 
 static void CheckToggleState()
@@ -2347,14 +1556,6 @@ void ImeUi_SetInsertMode(_In_ bool bInsert)
 bool ImeUi_GetCaretStatus()
 {
     return !g_bInitialized || !g_szCompositionString[0];
-}
-
-void ImeUi_SetScreenDimension(_In_ UINT width, _In_ UINT height)
-{
-    if (!g_bInitialized)
-        return;
-    g_screenWidth = width;
-    g_screenHeight = height;
 }
 
 // this function is used only in brief time in CHT IME handling, so accelerator isn't processed.

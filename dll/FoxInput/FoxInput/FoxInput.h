@@ -15,8 +15,8 @@ extern "C"
 {
 #endif
 
-    double FOXINPUT_API FI_Init(double hwnd);
-    double FOXINPUT_API FI_Init_GMS(HWND hwnd);
+    double FOXINPUT_API FI_Init(double hwnd, double encode);
+    double FOXINPUT_API FI_Init_GMS(HWND hwnd, double encode);
     double FOXINPUT_API FI_Release();
 
     // 启用、禁用输入法。

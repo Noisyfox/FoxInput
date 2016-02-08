@@ -138,14 +138,16 @@ bool UninstallWndProc()
     return false;
 }
 
-double FI_Init(double hwnd)
+double FI_Init(double hwnd, double encode)
 {
-    return FI_Init_GMS((HWND)(long)hwnd);
+    return FI_Init_GMS((HWND)(long)hwnd, encode);
 }
 
-double FI_Init_GMS(HWND hwnd)
+double FI_Init_GMS(HWND hwnd, double encode)
 {
     w_hwnd = hwnd;
+
+    g_uCodePage = (UINT)encode;
 
     ImeUiCallback_Malloc = malloc;
     ImeUiCallback_Free = free;

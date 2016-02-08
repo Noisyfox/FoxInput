@@ -41,6 +41,8 @@ extern "C"
     LPCSTR FOXINPUT_API FI_GetCandidate(double index);
     // 获取用户输入的Composition字符串
     LPCSTR FOXINPUT_API FI_GetCompositionString();
+    // 获取当前输入光标所在的字符数
+    double FOXINPUT_API FI_GetCompositionCursorChars();
 
 #ifdef __cplusplus
 }

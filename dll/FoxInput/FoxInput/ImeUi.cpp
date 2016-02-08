@@ -1035,8 +1035,6 @@ bool ImeUi_Initialize(_In_  HWND hwnd, _In_ bool bDisable)
     }
     ImeUi_EnableIme(false);
 
-    InitializeCriticalSection(&ImeUiSyncRoot);
-
     return true;
 }
 
@@ -1059,7 +1057,6 @@ void ImeUi_Uninitialize()
         g_hImmDll = nullptr;
     }
     g_disableCicero.Uninitialize();
-    DeleteCriticalSection(&ImeUiSyncRoot);
     g_bInitialized = false;
 }
 

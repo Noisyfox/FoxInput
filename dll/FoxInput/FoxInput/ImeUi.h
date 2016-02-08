@@ -64,3 +64,13 @@ extern void(__cdecl*ImeUiCallback_Free)(_In_ void* ptr);
 extern void (CALLBACK*ImeUiCallback_OnChar)(_In_ WCHAR wc);
 
 extern CRITICAL_SECTION ImeUiSyncRoot;
+
+inline void ImeUi_InitSyncRoot()
+{
+    InitializeCriticalSection(&ImeUiSyncRoot);
+}
+
+inline void ImeUi_DeleteSyncRoot()
+{
+    DeleteCriticalSection(&ImeUiSyncRoot);
+}

@@ -2228,6 +2228,8 @@ void CTsfUiLessMode::MakeCandidateStrings(ITfCandidateListUIElement* pcandidate)
     {
         ImeUiCallback_Free(IndexList);
     }
+
+    g_dwCount = std::min<DWORD>(g_dwCount, g_uCandPageSize);
 }
 
 ITfUIElement* CTsfUiLessMode::GetUIElement(DWORD dwUIElementId)

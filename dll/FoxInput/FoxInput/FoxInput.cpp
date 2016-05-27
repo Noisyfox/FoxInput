@@ -50,10 +50,12 @@ void CALLBACK OnChar(WCHAR wc)
 {
     Autolock _lock(ImeUiSyncRoot);
 
-    g_wInputString.push_back(wc);
+    if (iswprint(wc)) {
+        g_wInputString.push_back(wc);
 
-    WCHAR str[] = {wc, L'\n', L'\0'};
-    OutputDebugStringW(str);
+        WCHAR str[] = { wc, L'\n', L'\0' };
+        OutputDebugStringW(str);
+    }
 }
 
 LRESULT CALLBACK IMEProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)

@@ -232,6 +232,7 @@ static int                      g_iCandListIndexBase;
 static DWORD                    g_dwImeUiFlags = IMEUI_FLAG_SUPPORT_CARET;
 static bool                     g_bUILessMode = false;
 static HMODULE                  g_hImmDll = nullptr;
+static bool                     g_bHideToolbar = false;
 
 #define IsNT() (g_osi.dwPlatformId == VER_PLATFORM_WIN32_NT)
 
@@ -1698,12 +1699,15 @@ static void OnInputLangChange()
         // Other languages use the level that is specified by ImeUi_SetSupportLevel()
         SetSupportLevel((GETPRIMLANG() == LANG_KOREAN) ? 3 : g_dwIMELevelSaved);
     }
-    HWND hwndImeDef = _ImmGetDefaultIMEWnd(g_hwndCurr);
-    if (hwndImeDef)
+    if (g_bHideToolbar)
     {
-        // Fix for Zooty #3995: prevent CHT IME toobar from showing up
-        SendMessageA(hwndImeDef, WM_IME_CONTROL, IMC_OPENSTATUSWINDOW, 0);
-        SendMessageA(hwndImeDef, WM_IME_CONTROL, IMC_CLOSESTATUSWINDOW, 0);
+        HWND hwndImeDef = _ImmGetDefaultIMEWnd(g_hwndCurr);
+        if (hwndImeDef)
+        {
+            // Fix for Zooty #3995: prevent CHT IME toobar from showing up
+            SendMessageA(hwndImeDef, WM_IME_CONTROL, IMC_OPENSTATUSWINDOW, 0);
+            SendMessageA(hwndImeDef, WM_IME_CONTROL, IMC_CLOSESTATUSWINDOW, 0);
+        }
     }
 }
 
@@ -1811,6 +1815,29 @@ void ImeUi_SetFlags(_In_ DWORD dwFlags, _In_ bool bSet)
     else
     {
         g_dwImeUiFlags &= ~dwFlags;
+    }
+}
+
+void ImeUi_SetHideToolbar(bool bHide)
+{
+    if (g_bHideToolbar == bHide)
+    {
+        return;
+    }
+
+    g_bHideToolbar = bHide;
+    HWND hwndImeDef = _ImmGetDefaultIMEWnd(g_hwndCurr);
+    if (hwndImeDef)
+    {
+        if (bHide)
+        {
+            SendMessageA(hwndImeDef, WM_IME_CONTROL, IMC_OPENSTATUSWINDOW, 0);
+            SendMessageA(hwndImeDef, WM_IME_CONTROL, IMC_CLOSESTATUSWINDOW, 0);
+        }
+        else
+        {
+            SendMessageA(hwndImeDef, WM_IME_CONTROL, IMC_OPENSTATUSWINDOW, 0);
+        }
     }
 }
 

@@ -265,6 +265,14 @@ double FI_ExitFullControlMode()
     return FALSE;
 }
 
+double FI_HideToolbar(double hide)
+{
+    int hi = (int)hide;
+    ImeUi_SetHideToolbar(hi != FALSE);
+
+    return TRUE;
+}
+
 double FI_GrabInputText(double enable)
 {
     int en = (int)enable;
@@ -406,4 +414,3 @@ double FI_GetCompositionCursorChars()
 {
     return g_compositionStringCursor;
 }
-

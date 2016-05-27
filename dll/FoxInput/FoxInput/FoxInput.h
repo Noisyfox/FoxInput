@@ -33,6 +33,9 @@ extern "C"
     double FOXINPUT_API FI_EnterFullControlMode();
     double FOXINPUT_API FI_ExitFullControlMode();
 
+    // 隐藏语言栏，包括win8.1开始的新的输入法切换器
+    double FOXINPUT_API FI_HideToolbar(double hide);
+
     // 设置本插件是否需要读取用户输入
     // 当开启完整控制模式时该选项强制开启
     double FOXINPUT_API FI_GrabInputText(double enable);

@@ -43,6 +43,7 @@ void ImeUi_SetWindow(_In_ HWND hwnd);
 UINT ImeUi_GetInputCodePage();
 DWORD ImeUi_GetFlags();
 void ImeUi_SetFlags(_In_ DWORD dwFlags, _In_ bool bSet);
+void ImeUi_SetHideToolbar(_In_ bool bHide);
 
 WORD ImeUi_GetPrimaryLanguage();
 DWORD ImeUi_GetImeId(_In_ UINT uIndex);
